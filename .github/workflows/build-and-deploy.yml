@@ -135,15 +135,16 @@ jobs:
           echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER}"
           echo "SHORT_SHA: ${SHORT_SHA}"
 
+          # explicite podane dependency - java-service - patrz Chart.yaml w serwisie
           helm template ${APP_NAME} ./helm \
             --namespace ${{ inputs.aks_namespace }} \
             --create-namespace \
-            --set image.repository=${ACR_LOGIN_SERVER}/${APP_NAME} \
-            --set image.tag=${SHORT_SHA}
+            --set java-service.image.repository=${ACR_LOGIN_SERVER}/${APP_NAME} \
+            --set java-service.image.tag=${SHORT_SHA}
 
           helm upgrade --install ${APP_NAME} ./helm \
             --namespace ${{ inputs.aks_namespace }} \
             --create-namespace \
-            --set image.repository=${ACR_LOGIN_SERVER}/${APP_NAME} \
-            --set image.tag=${SHORT_SHA}
+            --set java-service.image.repository=${ACR_LOGIN_SERVER}/${APP_NAME} \
+            --set java-service.image.tag=${SHORT_SHA}
 
