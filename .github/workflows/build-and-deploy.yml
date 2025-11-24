@@ -131,6 +131,10 @@ jobs:
           # pobierze java-service-1.0.0.tgz do ./helm/charts/
           helm dependency update ./helm
 
+          echo "APP_NAME: ${APP_NAME}"
+          echo "ACR_LOGIN_SERVER: ${ACR_LOGIN_SERVER}"
+          echo "SHORT_SHA: ${SHORT_SHA}"
+
           helm template ${APP_NAME} ./helm \
             --namespace ${{ inputs.aks_namespace }} \
             --create-namespace \
