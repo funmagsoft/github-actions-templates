@@ -125,6 +125,18 @@ jobs:
       - name: Deploy to AKS via Helm
         if: ${{ github.event_name == 'push' }}
         run: |
+          helm repo add funmagsoft https://funmagsoft.github.io/helm/charts
+          helm repo update
+
+          # pobierze java-service-1.0.0.tgz do ./helm/charts/
+          helm dependency update ./helm
+
+          helm template ${APP_NAME} ./helm \
+            --namespace ${{ inputs.aks_namespace }} \
+            --create-namespace \
+            --set image.repository=${ACR_LOGIN_SERVER}/${APP_NAME} \
+            --set image.tag=${SHORT_SHA}
+
           helm upgrade --install ${APP_NAME} ./helm \
             --namespace ${{ inputs.aks_namespace }} \
             --create-namespace \
