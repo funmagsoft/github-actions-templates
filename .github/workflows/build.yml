@@ -1,0 +1,113 @@
+name: Build Java Service (CI only)
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        type: string
+        required: true
+        description: "Name of the application (e.g., greeting-service)"
+    outputs:
+      image_tag:
+        description: "Short SHA of the built image"
+        value: ${{ jobs.build.outputs.image_tag }}
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  APP_NAME: ${{ inputs.app_name }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+  SHORT_SHA: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set_sha.outputs.short_sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
+      - name: Build Maven (with tests)
+        run: mvn -B -DskipTests=false verify
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-${{ inputs.app_name }}
+          path: target/surefire-reports
+
+      - name: Set SHORT_SHA
+        id: set_sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      # --- BUILD DOCKER IMAGE ON PR ---
+      - name: Build Docker image for PR (no push)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          docker build -t ${APP_NAME}:${GITHUB_SHA::7}-pr .
+
+      # --- PUSH WORK STARTS HERE (ONLY PUSH TO MAIN) ---
+      - name: Build Docker image
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          docker build -t ${APP_NAME}:${GITHUB_SHA::7} .
+
+      - name: Azure Login (OIDC)
+        if: ${{ github.event_name == 'push' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        if: ${{ github.event_name == 'push' }}
+        run: az acr login --name ${ACR_NAME}
+
+      - name: Tag images (sha + latest)
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          docker tag ${APP_NAME}:${GITHUB_SHA::7} ${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA::7}
+          docker tag ${APP_NAME}:${GITHUB_SHA::7} ${ACR_LOGIN_SERVER}/${APP_NAME}:latest
+
+      - name: Push images to ACR
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          docker push ${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA::7}
+          docker push ${ACR_LOGIN_SERVER}/${APP_NAME}:latest
+
+      - name: Build Summary
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          echo "### 🚀 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **App**: ${APP_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${GITHUB_SHA::7}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: ${ACR_LOGIN_SERVER}/${APP_NAME}:${GITHUB_SHA::7}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest**: ${ACR_LOGIN_SERVER}/${APP_NAME}:latest" >> $GITHUB_STEP_SUMMARY
+
